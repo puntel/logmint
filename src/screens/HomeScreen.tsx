@@ -1,32 +1,66 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { getAllLevels } from '../services/curriculumService';
+import { getAllLessonsInOrder, getAllLevels } from '../services/curriculumService';
 import { getCompletedLessons, getLastLessonId } from '../services/progressService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 export default function HomeScreen({ navigation }: Props) {
   const levels = useMemo(() => getAllLevels(), []);
+  const lessonsInOrder = useMemo(() => getAllLessonsInOrder(), []);
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(new Set());
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadProgress = async () => {
-      const completed = await getCompletedLessons();
-      const last = await getLastLessonId();
-      setCompletedLessons(completed);
-      setLastLessonId(last);
-    };
-
-    loadProgress();
+  const loadProgress = useCallback(async () => {
+    const completed = await getCompletedLessons();
+    const last = await getLastLessonId();
+    setCompletedLessons(completed);
+    setLastLessonId(last);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProgress();
+    }, [loadProgress])
+  );
+
+  const unlockedLessons = useMemo(() => {
+    const unlocked = new Set<string>();
+
+    lessonsInOrder.forEach((lesson, index) => {
+      // A primeira lição sempre fica liberada
+      if (index === 0) {
+        unlocked.add(lesson.id);
+        return;
+      }
+
+      const prevLesson = lessonsInOrder[index - 1];
+      if (completedLessons.has(prevLesson.id)) {
+        unlocked.add(lesson.id);
+      }
+    });
+
+    return unlocked;
+  }, [lessonsInOrder, completedLessons]);
+
+  const totalLessons = lessonsInOrder.length;
+  const completedCount = completedLessons.size;
+  const progress = totalLessons === 0 ? 0 : completedCount / totalLessons;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>LogiMente</Text>
       <Text style={styles.subtitle}>Aprenda Lógica de Programação de forma gamificada</Text>
+
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBarBackground}>
+          <View style={[styles.progressBarFill, { width: `${Math.floor(progress * 100)}%` }]} />
+        </View>
+        <Text style={styles.progressText}>{`${completedCount} de ${totalLessons} lições concluídas`}</Text>
+      </View>
 
       {lastLessonId ? (
         <TouchableOpacity
@@ -49,15 +83,24 @@ export default function HomeScreen({ navigation }: Props) {
 
               {unit.lessons.map(lesson => {
                 const completed = completedLessons.has(lesson.id);
+                const unlocked = unlockedLessons.has(lesson.id);
                 return (
                   <TouchableOpacity
                     key={lesson.id}
-                    style={styles.lessonButton}
-                    onPress={() => navigation.navigate('Lesson', { lessonId: lesson.id })}
+                    style={[
+                      styles.lessonButton,
+                      !unlocked ? styles.lessonButtonLocked : undefined,
+                    ]}
+                    onPress={() => {
+                      if (!unlocked) return;
+                      navigation.navigate('Lesson', { lessonId: lesson.id });
+                    }}
+                    disabled={!unlocked}
                   >
                     <Text style={styles.lessonButtonText}>
                       {completed ? '✅ ' : ''}
                       {lesson.title}
+                      {!unlocked ? ' 🔒' : ''}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -132,12 +175,35 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     color: '#555',
   },
+  progressContainer: {
+    marginBottom: 18,
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 12,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#2E86AB',
+  },
+  progressText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#333',
+    textAlign: 'right',
+  },
   lessonButton: {
     backgroundColor: '#2E86AB',
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
     marginBottom: 8,
+  },
+  lessonButtonLocked: {
+    backgroundColor: '#d1d5db',
   },
   lessonButtonText: {
     color: '#fff',
